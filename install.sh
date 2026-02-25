@@ -12,7 +12,16 @@ CERT_DIR="/etc/letsencrypt/live/$DOMAIN"
 
 export DEBIAN_FRONTEND=noninteractive
 
-apt-get update -qq 2>/dev/null && apt-get install -yq --no-install-recommends certbot nginx >/dev/null 2>&1
+if command -v apt-get >/dev/null 2>&1; then
+    apt-get update -qq >/dev/null 2>&1
+    apt-get install -yq --no-install-recommends certbot nginx unzip curl >/dev/null 2>&1
+elif command -v dnf >/dev/null 2>&1; then
+    dnf -y makecache >/dev/null 2>&1
+    dnf install -y certbot nginx unzip curl >/dev/null 2>&1
+else
+    echo "Unsupported distro: need apt-get or dnf."
+    exit 1
+fi
 
 if [ ! -d "$CERT_DIR" ]; then
     systemctl stop nginx 2>/dev/null || true
@@ -21,7 +30,7 @@ if [ ! -d "$CERT_DIR" ]; then
 fi
 
 if [ ! -f /usr/local/bin/xray ]; then
-    wget -q -O /tmp/xray.zip https://github.com/XTLS/Xray-core/releases/latest/download/Xray-linux-64.zip
+    curl -fsSL -o /tmp/xray.zip https://github.com/XTLS/Xray-core/releases/latest/download/Xray-linux-64.zip
     unzip -oq /tmp/xray.zip xray -d /usr/local/bin
     chmod +x /usr/local/bin/xray
     rm -f /tmp/xray.zip

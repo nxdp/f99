@@ -4,7 +4,7 @@ One-command VLESS+WS proxy server with TLS.
 
 ## Requirements
 
-- Debian/Ubuntu server
+- Debian 12/13 or Ubuntu 22/24, or RHEL 9/10
 - Domain pointing to your server IP
 - `curl`, `openssl` available
 - Root access

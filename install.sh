@@ -10,14 +10,13 @@ INSTANCE=$(echo "$DOMAIN" | tr '.' '-')
 XRAY_PORT=$(shuf -i 10000-60000 -n 1)
 CERT_DIR="/etc/letsencrypt/live/$DOMAIN"
 
-export DEBIAN_FRONTEND=noninteractive
-
 if command -v apt-get >/dev/null 2>&1; then
+    export DEBIAN_FRONTEND=noninteractive
     apt-get update -qq >/dev/null 2>&1
-    apt-get install -yq --no-install-recommends certbot nginx unzip curl >/dev/null 2>&1
+    apt-get install -yq --no-install-recommends certbot nginx unzip curl qrencode >/dev/null 2>&1
 elif command -v dnf >/dev/null 2>&1; then
     dnf -y makecache >/dev/null 2>&1
-    dnf install -y certbot nginx unzip curl >/dev/null 2>&1
+    dnf install -y certbot nginx unzip curl qrencode >/dev/null 2>&1
 else
     echo "Unsupported distro: need apt-get or dnf."
     exit 1
@@ -176,4 +175,9 @@ systemctl restart xray@$INSTANCE nginx 2>/dev/null
 ENCODED_PATH=$(python3 -c "import urllib.parse; print(urllib.parse.quote('$WS_PATH'))")
 INSECURE="${NOVA_STAGING:+&allowInsecure=1}"
 
-echo "vless://$UUID@$DOMAIN:443?type=ws&security=tls&path=$ENCODED_PATH&sni=$DOMAIN&alpn=h2%2Chttp%2F1.1$INSECURE#NOVA-$INSTANCE"
+VLESS_URI="vless://$UUID@$DOMAIN:443?type=ws&security=tls&path=$ENCODED_PATH&sni=$DOMAIN&alpn=h2%2Chttp%2F1.1$INSECURE#NOVA-$INSTANCE"
+
+echo "$VLESS_URI" | qrencode -t utf8
+echo ""
+echo "$VLESS_URI"
+echo ""

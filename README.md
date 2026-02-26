@@ -16,7 +16,7 @@ export NOVA_DOMAIN=sub.domain.tld
 bash <(curl -fsSL https://raw.githubusercontent.com/nxdp/nova/main/install.sh)
 ```
 
-Outputs a `vless://` URI ready to import into your client.
+Outputs a QR code and `vless://` URI ready to import into your client.
 
 ## Options
 

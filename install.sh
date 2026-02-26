@@ -28,12 +28,43 @@ PY
 
 HOST="${NOVA_HOST:-$(detect_primary_ip)}"
 UUID="${NOVA_UUID:-$(cat /proc/sys/kernel/random/uuid)}"
+XHTTP_ENABLED="${NOVA_XHTTP:-1}"
+WS_ENABLED="${NOVA_WS:-0}"
 WS_PATH="${NOVA_WS_PATH:-"/api/v1/$(openssl rand -hex 4)"}"
+XHTTP_PATH="${NOVA_XHTTP_PATH:-"/api/v1/$(openssl rand -hex 4)"}"
 ACME_STAGING="${NOVA_STAGING:+--staging}"
 ACME_FORCE="${NOVA_FORCE:+--force}"
 
 INSTANCE=$(echo "$HOST" | tr '.:' '--')
-XRAY_PORT=$(shuf -i 10000-60000 -n 1)
+WS_PORT=""
+XHTTP_PORT=""
+
+if [ "$XHTTP_ENABLED" != "0" ] && [ "$XHTTP_ENABLED" != "1" ]; then
+    echo "NOVA_XHTTP must be 0 or 1." >&2
+    exit 1
+fi
+
+if [ "$WS_ENABLED" != "0" ] && [ "$WS_ENABLED" != "1" ]; then
+    echo "NOVA_WS must be 0 or 1." >&2
+    exit 1
+fi
+
+if [ "$XHTTP_ENABLED" = "0" ] && [ "$WS_ENABLED" = "0" ]; then
+    echo "At least one transport must be enabled (NOVA_XHTTP=1 or NOVA_WS=1)." >&2
+    exit 1
+fi
+
+if [ "$WS_ENABLED" = "1" ]; then
+    WS_PORT=$(shuf -i 10000-60000 -n 1)
+fi
+
+if [ "$XHTTP_ENABLED" = "1" ]; then
+    XHTTP_PORT=$(shuf -i 10000-60000 -n 1)
+fi
+
+if [ "$WS_ENABLED" = "1" ] && [ "$XHTTP_ENABLED" = "1" ] && [ "$WS_PORT" = "$XHTTP_PORT" ]; then
+    XHTTP_PORT=$(shuf -i 10000-60000 -n 1)
+fi
 
 IS_IP_CERT=0
 if is_ip "$HOST"; then
@@ -60,7 +91,7 @@ if [ ! -x "$HOME/.acme.sh/acme.sh" ]; then
     curl -s https://get.acme.sh | sh >/dev/null 2>&1
 fi
 
-if [ ! -f "$CERT_FULLCHAIN" ] || [ ! -f "$CERT_KEY" ]; then
+if [ -n "${NOVA_FORCE:-}" ] || [ ! -f "$CERT_FULLCHAIN" ] || [ ! -f "$CERT_KEY" ]; then
     systemctl stop nginx 2>/dev/null || true
     ACME_ARGS=(--issue --standalone -d "$HOST" --server letsencrypt --keylength ec-256 --debug 0 --log-level 1)
     if [ "$IS_IP_CERT" -eq 1 ]; then
@@ -83,25 +114,63 @@ if [ ! -f /usr/local/bin/xray ]; then
 fi
 
 mkdir -p /usr/local/etc/xray
+INBOUNDS_JSON=""
+if [ "$WS_ENABLED" = "1" ]; then
+    INBOUNDS_JSON="$(cat <<EOF
+    {
+      "listen": "127.0.0.1",
+      "port": $WS_PORT,
+      "protocol": "vless",
+      "settings": {
+        "clients": [{"id": "$UUID"}],
+        "decryption": "none"
+      },
+      "streamSettings": {
+        "network": "ws",
+        "wsSettings": {"path": "$WS_PATH"}
+      }
+    }
+EOF
+)"
+fi
+
+if [ "$XHTTP_ENABLED" = "1" ]; then
+    XHTTP_INBOUND="$(cat <<EOF
+    {
+      "listen": "127.0.0.1",
+      "port": $XHTTP_PORT,
+      "protocol": "vless",
+      "settings": {
+        "clients": [{"id": "$UUID"}],
+        "decryption": "none"
+      },
+      "streamSettings": {
+        "network": "xhttp",
+        "xhttpSettings": {
+          "mode": "packet-up",
+          "path": "$XHTTP_PATH"
+        }
+      }
+    }
+EOF
+)"
+    if [ -n "$INBOUNDS_JSON" ]; then
+        INBOUNDS_JSON="$INBOUNDS_JSON,
+$XHTTP_INBOUND"
+    else
+        INBOUNDS_JSON="$XHTTP_INBOUND"
+    fi
+fi
+
 cat > "/usr/local/etc/xray/$INSTANCE.json" <<EOF
 {
   "log": {"loglevel": "warning"},
   "routing": {
     "rules": [{"outboundTag": "blocked", "protocol": ["bittorrent"], "type": "field"}]
   },
-  "inbounds": [{
-    "listen": "127.0.0.1",
-    "port": $XRAY_PORT,
-    "protocol": "vless",
-    "settings": {
-      "clients": [{"id": "$UUID"}],
-      "decryption": "none"
-    },
-    "streamSettings": {
-      "network": "ws",
-      "wsSettings": {"path": "$WS_PATH"}
-    }
-  }],
+  "inbounds": [
+$INBOUNDS_JSON
+  ],
   "outbounds": [
     {"protocol": "freedom", "tag": "direct"},
     {"protocol": "blackhole", "tag": "blocked"}
@@ -128,12 +197,49 @@ EOF
 
 rm -f /etc/nginx/sites-enabled/default /etc/nginx/conf.d/default.conf
 
-cat > "/etc/nginx/conf.d/$INSTANCE.conf" <<EOF
-map \$http_upgrade \$connection_upgrade {
-    default upgrade;
-    '' close;
-}
+WS_LOCATION_BLOCK=""
+if [ "$WS_ENABLED" = "1" ]; then
+    WS_LOCATION_BLOCK="$(cat <<EOF
+    location $WS_PATH {
+        proxy_pass http://127.0.0.1:$WS_PORT;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host \$host;
+        proxy_read_timeout 86400;
+        proxy_send_timeout 86400;
+        proxy_request_buffering off;
+        proxy_buffering off;
+        proxy_cache off;
+        tcp_nodelay on;
+    }
+EOF
+)"
+fi
 
+XHTTP_LOCATION_BLOCK=""
+if [ "$XHTTP_ENABLED" = "1" ]; then
+    XHTTP_LOCATION_BLOCK="$(cat <<EOF
+    location $XHTTP_PATH {
+        proxy_pass http://127.0.0.1:$XHTTP_PORT;
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header Connection "";
+        proxy_set_header X-Forwarded-For \$remote_addr;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_read_timeout 86400;
+        proxy_send_timeout 86400;
+        proxy_request_buffering off;
+        proxy_buffering off;
+        proxy_cache off;
+        tcp_nodelay on;
+        chunked_transfer_encoding on;
+    }
+EOF
+)"
+fi
+
+cat > "/etc/nginx/conf.d/$INSTANCE.conf" <<EOF
 server {
     listen 80$( [ "$IS_IP_CERT" -eq 1 ] && echo " default_server");
     server_name $HOST;
@@ -163,17 +269,8 @@ server {
         try_files \$uri \$uri/ /index.html;
     }
 
-    location $WS_PATH {
-        proxy_pass http://127.0.0.1:$XRAY_PORT;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade \$http_upgrade;
-        proxy_set_header Connection \$connection_upgrade;
-        proxy_set_header Host \$host;
-        proxy_read_timeout 86400;
-        proxy_send_timeout 86400;
-        proxy_buffering off;
-        tcp_nodelay on;
-    }
+$WS_LOCATION_BLOCK
+$XHTTP_LOCATION_BLOCK
 }
 EOF
 
@@ -219,7 +316,6 @@ systemctl daemon-reload
 systemctl --no-block enable -q xray@$INSTANCE nginx 2>/dev/null
 systemctl restart xray@$INSTANCE nginx 2>/dev/null
 
-ENCODED_PATH=$(python3 -c "import urllib.parse; print(urllib.parse.quote('$WS_PATH'))")
 ALLOW_INSECURE="0"
 if [ -n "${NOVA_STAGING:-}" ]; then
     ALLOW_INSECURE="1"
@@ -233,9 +329,24 @@ if [ "$IS_IP_CERT" -eq 0 ]; then
     SNI_PARAM="&sni=$HOST"
 fi
 
-VLESS_URI="vless://$UUID@$URI_HOST:443?type=ws&security=tls&path=$ENCODED_PATH$SNI_PARAM&alpn=h2%2Chttp%2F1.1&allowInsecure=$ALLOW_INSECURE#NOVA"
+if [ "$XHTTP_ENABLED" = "1" ]; then
+    ENCODED_XHTTP_PATH=$(python3 -c "import urllib.parse; print(urllib.parse.quote('$XHTTP_PATH'))")
+    XHTTP_URI="vless://$UUID@$URI_HOST:443?type=xhttp&mode=packet-up&security=tls&path=$ENCODED_XHTTP_PATH$SNI_PARAM&alpn=h2%2Chttp%2F1.1&allowInsecure=$ALLOW_INSECURE#NOVA"
+    echo "$XHTTP_URI" | qrencode -t utf8
+    echo ""
+    echo "$XHTTP_URI"
+    echo ""
+fi
 
-echo "$VLESS_URI" | qrencode -t utf8
-echo ""
-echo "$VLESS_URI"
-echo ""
+if [ "$WS_ENABLED" = "1" ]; then
+    ENCODED_WS_PATH=$(python3 -c "import urllib.parse; print(urllib.parse.quote('$WS_PATH'))")
+    WS_REMARK="NOVA"
+    if [ "$XHTTP_ENABLED" = "1" ]; then
+        WS_REMARK="NOVA-WS"
+    fi
+    WS_URI="vless://$UUID@$URI_HOST:443?type=ws&security=tls&path=$ENCODED_WS_PATH$SNI_PARAM&alpn=h2%2Chttp%2F1.1&allowInsecure=$ALLOW_INSECURE#$WS_REMARK"
+    echo "$WS_URI" | qrencode -t utf8
+    echo ""
+    echo "$WS_URI"
+    echo ""
+fi

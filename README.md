@@ -1,6 +1,7 @@
 # NOVA
 
-One-command VLESS+WS proxy server with TLS.
+One-command VLESS proxy server with TLS.
+Supports VLESS+XHTTP by default, with optional VLESS+WS.
 
 ## Requirements
 
@@ -24,6 +25,9 @@ All variables are optional.
 | Variable | Required | Default |
 |---|---|---|
 | `NOVA_HOST` | **NO** | server primary IPv4 |
+| `NOVA_XHTTP` | **NO** | `1` (enabled) |
+| `NOVA_WS` | **NO** | `0` (disabled) |
+| `NOVA_XHTTP_PATH` | **NO** | auto-generated |
 | `NOVA_UUID` | **NO** | auto-generated |
 | `NOVA_WS_PATH` | **NO** | auto-generated |
 | `NOVA_STAGING` | **NO** | — |
@@ -33,6 +37,9 @@ All variables are optional.
 
 - If `NOVA_HOST` is an IP (or unset and auto-detected as IP), the script requests an IP certificate via acme.sh using Let's Encrypt short-lived profile.
 - If `NOVA_HOST` is a domain, the script requests a normal domain certificate.
+- `NOVA_XHTTP=1` enables XHTTP transport (default).
+- `NOVA_WS=1` enables WebSocket transport.
+- You can run both transports at the same time.
 
 ## Examples
 
@@ -42,6 +49,16 @@ curl -fsSL https://raw.githubusercontent.com/nxdp/nova/main/install.sh | bash
 
 # production (domain cert)
 export NOVA_HOST=sub.example.com
+curl -fsSL https://raw.githubusercontent.com/nxdp/nova/main/install.sh | bash
+
+# xhttp + ws together
+export NOVA_XHTTP=1
+export NOVA_WS=1
+curl -fsSL https://raw.githubusercontent.com/nxdp/nova/main/install.sh | bash
+
+# ws only
+export NOVA_XHTTP=0
+export NOVA_WS=1
 curl -fsSL https://raw.githubusercontent.com/nxdp/nova/main/install.sh | bash
 
 # testing (staging cert)
@@ -60,3 +77,4 @@ curl -fsSL https://raw.githubusercontent.com/nxdp/nova/main/install.sh | bash
 Import the output `vless://` URI into any xray-based client (v2rayN, v2rayNG, Hiddify).
 
 Set `alpn` to `h2,http/1.1` if your client doesn't parse it from the URI.
+If both transports are enabled, installer prints `#NOVA` (XHTTP) and `#NOVA-WS`.

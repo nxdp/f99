@@ -8,7 +8,7 @@ detect_primary_ip() {
         ip_addr="$(hostname -I 2>/dev/null | awk '{print $1}')"
     fi
     if [ -z "${ip_addr:-}" ]; then
-        echo "Unable to detect primary IPv4. Set NOVA_HOST explicitly." >&2
+        echo "Unable to detect primary IPv4. Set F99_HOST explicitly." >&2
         exit 1
     fi
     echo "$ip_addr"
@@ -30,33 +30,33 @@ except ValueError:
 PY
 }
 
-HOST="${NOVA_HOST:-$(detect_primary_ip)}"
-BASE_UUID="${NOVA_UUID:-$(cat /proc/sys/kernel/random/uuid)}"
-WS_UUID="${NOVA_UUID_WS:-$BASE_UUID}"
-XHTTP_UUID="${NOVA_UUID_XHTTP:-$BASE_UUID}"
-XHTTP_ENABLED="${NOVA_XHTTP:-1}"
-WS_ENABLED="${NOVA_WS:-0}"
-WS_PATH="${NOVA_WS_PATH:-"/api/v1/$(openssl rand -hex 4)"}"
-XHTTP_PATH="${NOVA_XHTTP_PATH:-"/api/v2/$(openssl rand -hex 4)"}"
-ACME_STAGING="${NOVA_STAGING:+--staging}"
-ACME_FORCE="${NOVA_FORCE:+--force}"
+HOST="${F99_HOST:-$(detect_primary_ip)}"
+BASE_UUID="${F99_UUID:-$(cat /proc/sys/kernel/random/uuid)}"
+WS_UUID="${F99_UUID_WS:-$BASE_UUID}"
+XHTTP_UUID="${F99_UUID_XHTTP:-$BASE_UUID}"
+XHTTP_ENABLED="${F99_XHTTP:-1}"
+WS_ENABLED="${F99_WS:-0}"
+WS_PATH="${F99_WS_PATH:-"/api/v1/$(openssl rand -hex 4)"}"
+XHTTP_PATH="${F99_XHTTP_PATH:-"/api/v2/$(openssl rand -hex 4)"}"
+ACME_STAGING="${F99_STAGING:+--staging}"
+ACME_FORCE="${F99_FORCE:+--force}"
 
 INSTANCE=$(echo "$HOST" | tr '.:' '--')
 WS_PORT=""
 XHTTP_PORT=""
 
 if [ "$XHTTP_ENABLED" != "0" ] && [ "$XHTTP_ENABLED" != "1" ]; then
-    echo "NOVA_XHTTP must be 0 or 1." >&2
+    echo "F99_XHTTP must be 0 or 1." >&2
     exit 1
 fi
 
 if [ "$WS_ENABLED" != "0" ] && [ "$WS_ENABLED" != "1" ]; then
-    echo "NOVA_WS must be 0 or 1." >&2
+    echo "F99_WS must be 0 or 1." >&2
     exit 1
 fi
 
 if [ "$XHTTP_ENABLED" = "0" ] && [ "$WS_ENABLED" = "0" ]; then
-    echo "At least one transport must be enabled (NOVA_XHTTP=1 or NOVA_WS=1)." >&2
+    echo "At least one transport must be enabled (F99_XHTTP=1 or F99_WS=1)." >&2
     exit 1
 fi
 
@@ -115,7 +115,7 @@ if [ ! -x "$HOME/.acme.sh/acme.sh" ]; then
     curl -s https://get.acme.sh | sh >/dev/null 2>&1
 fi
 
-if [ -n "${NOVA_FORCE:-}" ] || [ ! -f "$CERT_FULLCHAIN" ] || [ ! -f "$CERT_KEY" ]; then
+if [ -n "${F99_FORCE:-}" ] || [ ! -f "$CERT_FULLCHAIN" ] || [ ! -f "$CERT_KEY" ]; then
     systemctl stop nginx 2>/dev/null || true
     ACME_ARGS=(--issue --standalone -d "$HOST" --server letsencrypt --keylength ec-256 --debug 0 --log-level 1)
     if [ "$IS_IP_CERT" -eq 1 ]; then
@@ -342,7 +342,7 @@ systemctl --no-block enable -q xray@$INSTANCE nginx 2>/dev/null
 systemctl restart xray@$INSTANCE nginx 2>/dev/null
 
 ALLOW_INSECURE="0"
-if [ -n "${NOVA_STAGING:-}" ]; then
+if [ -n "${F99_STAGING:-}" ]; then
     ALLOW_INSECURE="1"
 fi
 URI_HOST="$HOST"
@@ -356,7 +356,7 @@ fi
 
 if [ "$XHTTP_ENABLED" = "1" ]; then
     ENCODED_XHTTP_PATH=$(python3 -c "import urllib.parse; print(urllib.parse.quote('$XHTTP_PATH'))")
-    XHTTP_URI="vless://$XHTTP_UUID@$URI_HOST:443?type=xhttp&mode=packet-up&security=tls&path=$ENCODED_XHTTP_PATH$SNI_PARAM&alpn=h2%2Chttp%2F1.1&allowInsecure=$ALLOW_INSECURE#NOVA"
+    XHTTP_URI="vless://$XHTTP_UUID@$URI_HOST:443?type=xhttp&mode=packet-up&security=tls&path=$ENCODED_XHTTP_PATH$SNI_PARAM&alpn=h2%2Chttp%2F1.1&allowInsecure=$ALLOW_INSECURE#F99"
     echo "$XHTTP_URI" | qrencode -t utf8
     echo ""
     echo "$XHTTP_URI"
@@ -365,9 +365,9 @@ fi
 
 if [ "$WS_ENABLED" = "1" ]; then
     ENCODED_WS_PATH=$(python3 -c "import urllib.parse; print(urllib.parse.quote('$WS_PATH'))")
-    WS_REMARK="NOVA"
+    WS_REMARK="F99"
     if [ "$XHTTP_ENABLED" = "1" ]; then
-        WS_REMARK="NOVA-WS"
+        WS_REMARK="F99-WS"
     fi
     WS_URI="vless://$WS_UUID@$URI_HOST:443?type=ws&security=tls&path=$ENCODED_WS_PATH$SNI_PARAM&alpn=h2%2Chttp%2F1.1&allowInsecure=$ALLOW_INSECURE#$WS_REMARK"
     echo "$WS_URI" | qrencode -t utf8

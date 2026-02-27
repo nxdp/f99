@@ -37,7 +37,7 @@ XHTTP_UUID="${NOVA_UUID_XHTTP:-$BASE_UUID}"
 XHTTP_ENABLED="${NOVA_XHTTP:-1}"
 WS_ENABLED="${NOVA_WS:-0}"
 WS_PATH="${NOVA_WS_PATH:-"/api/v1/$(openssl rand -hex 4)"}"
-XHTTP_PATH="${NOVA_XHTTP_PATH:-"/api/v1/$(openssl rand -hex 4)"}"
+XHTTP_PATH="${NOVA_XHTTP_PATH:-"/api/v2/$(openssl rand -hex 4)"}"
 ACME_STAGING="${NOVA_STAGING:+--staging}"
 ACME_FORCE="${NOVA_FORCE:+--force}"
 

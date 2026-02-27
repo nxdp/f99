@@ -14,6 +14,10 @@ detect_primary_ip() {
     echo "$ip_addr"
 }
 
+rand_port() {
+    echo $((10000 + RANDOM % 50001))
+}
+
 is_ip() {
     python3 - "$1" <<'PY'
 import ipaddress
@@ -27,7 +31,9 @@ PY
 }
 
 HOST="${NOVA_HOST:-$(detect_primary_ip)}"
-UUID="${NOVA_UUID:-$(cat /proc/sys/kernel/random/uuid)}"
+BASE_UUID="${NOVA_UUID:-$(cat /proc/sys/kernel/random/uuid)}"
+WS_UUID="${NOVA_UUID_WS:-$BASE_UUID}"
+XHTTP_UUID="${NOVA_UUID_XHTTP:-$BASE_UUID}"
 XHTTP_ENABLED="${NOVA_XHTTP:-1}"
 WS_ENABLED="${NOVA_WS:-0}"
 WS_PATH="${NOVA_WS_PATH:-"/api/v1/$(openssl rand -hex 4)"}"
@@ -55,16 +61,16 @@ if [ "$XHTTP_ENABLED" = "0" ] && [ "$WS_ENABLED" = "0" ]; then
 fi
 
 if [ "$WS_ENABLED" = "1" ]; then
-    WS_PORT=$(shuf -i 10000-60000 -n 1)
+    WS_PORT="$(rand_port)"
 fi
 
 if [ "$XHTTP_ENABLED" = "1" ]; then
-    XHTTP_PORT=$(shuf -i 10000-60000 -n 1)
+    XHTTP_PORT="$(rand_port)"
 fi
 
-if [ "$WS_ENABLED" = "1" ] && [ "$XHTTP_ENABLED" = "1" ] && [ "$WS_PORT" = "$XHTTP_PORT" ]; then
-    XHTTP_PORT=$(shuf -i 10000-60000 -n 1)
-fi
+while [ -n "$WS_PORT" ] && [ -n "$XHTTP_PORT" ] && [ "$WS_PORT" = "$XHTTP_PORT" ]; do
+    XHTTP_PORT="$(rand_port)"
+done
 
 IS_IP_CERT=0
 if is_ip "$HOST"; then
@@ -78,6 +84,12 @@ fi
 ACME_DOMAIN_DIR="$HOME/.acme.sh/${HOST}_ecc"
 CERT_FULLCHAIN="$ACME_DOMAIN_DIR/fullchain.cer"
 CERT_KEY="$ACME_DOMAIN_DIR/${HOST}.key"
+
+XRAY_DOWNLOAD_PID=""
+if [ ! -f /usr/local/bin/xray ]; then
+    curl -fsSL -o /tmp/xray.zip https://github.com/XTLS/Xray-core/releases/latest/download/Xray-linux-64.zip &
+    XRAY_DOWNLOAD_PID="$!"
+fi
 
 if command -v apt-get >/dev/null 2>&1; then
     export DEBIAN_FRONTEND=noninteractive
@@ -119,7 +131,7 @@ if [ -n "${NOVA_FORCE:-}" ] || [ ! -f "$CERT_FULLCHAIN" ] || [ ! -f "$CERT_KEY" 
 fi
 
 if [ ! -f /usr/local/bin/xray ]; then
-    curl -fsSL -o /tmp/xray.zip https://github.com/XTLS/Xray-core/releases/latest/download/Xray-linux-64.zip
+    wait "$XRAY_DOWNLOAD_PID"
     unzip -oq /tmp/xray.zip xray -d /usr/local/bin
     chmod +x /usr/local/bin/xray
     rm -f /tmp/xray.zip
@@ -134,7 +146,7 @@ if [ "$WS_ENABLED" = "1" ]; then
       "port": $WS_PORT,
       "protocol": "vless",
       "settings": {
-        "clients": [{"id": "$UUID"}],
+        "clients": [{"id": "$WS_UUID"}],
         "decryption": "none"
       },
       "streamSettings": {
@@ -153,7 +165,7 @@ if [ "$XHTTP_ENABLED" = "1" ]; then
       "port": $XHTTP_PORT,
       "protocol": "vless",
       "settings": {
-        "clients": [{"id": "$UUID"}],
+        "clients": [{"id": "$XHTTP_UUID"}],
         "decryption": "none"
       },
       "streamSettings": {
@@ -344,7 +356,7 @@ fi
 
 if [ "$XHTTP_ENABLED" = "1" ]; then
     ENCODED_XHTTP_PATH=$(python3 -c "import urllib.parse; print(urllib.parse.quote('$XHTTP_PATH'))")
-    XHTTP_URI="vless://$UUID@$URI_HOST:443?type=xhttp&mode=packet-up&security=tls&path=$ENCODED_XHTTP_PATH$SNI_PARAM&alpn=h2%2Chttp%2F1.1&allowInsecure=$ALLOW_INSECURE#NOVA"
+    XHTTP_URI="vless://$XHTTP_UUID@$URI_HOST:443?type=xhttp&mode=packet-up&security=tls&path=$ENCODED_XHTTP_PATH$SNI_PARAM&alpn=h2%2Chttp%2F1.1&allowInsecure=$ALLOW_INSECURE#NOVA"
     echo "$XHTTP_URI" | qrencode -t utf8
     echo ""
     echo "$XHTTP_URI"
@@ -357,7 +369,7 @@ if [ "$WS_ENABLED" = "1" ]; then
     if [ "$XHTTP_ENABLED" = "1" ]; then
         WS_REMARK="NOVA-WS"
     fi
-    WS_URI="vless://$UUID@$URI_HOST:443?type=ws&security=tls&path=$ENCODED_WS_PATH$SNI_PARAM&alpn=h2%2Chttp%2F1.1&allowInsecure=$ALLOW_INSECURE#$WS_REMARK"
+    WS_URI="vless://$WS_UUID@$URI_HOST:443?type=ws&security=tls&path=$ENCODED_WS_PATH$SNI_PARAM&alpn=h2%2Chttp%2F1.1&allowInsecure=$ALLOW_INSECURE#$WS_REMARK"
     echo "$WS_URI" | qrencode -t utf8
     echo ""
     echo "$WS_URI"

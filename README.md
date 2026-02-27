@@ -29,6 +29,8 @@ All variables are optional.
 | `NOVA_WS` | **NO** | `0` (disabled) |
 | `NOVA_XHTTP_PATH` | **NO** | auto-generated |
 | `NOVA_UUID` | **NO** | auto-generated |
+| `NOVA_UUID_XHTTP` | **NO** | `NOVA_UUID` |
+| `NOVA_UUID_WS` | **NO** | `NOVA_UUID` |
 | `NOVA_WS_PATH` | **NO** | auto-generated |
 | `NOVA_STAGING` | **NO** | — |
 | `NOVA_FORCE` | **NO** | — |
@@ -40,6 +42,9 @@ All variables are optional.
 - `NOVA_XHTTP=1` enables XHTTP transport (default).
 - `NOVA_WS=1` enables WebSocket transport.
 - You can run both transports at the same time.
+- UUID precedence:
+- XHTTP uses `NOVA_UUID_XHTTP`, then `NOVA_UUID`, then auto-generated UUID.
+- WS uses `NOVA_UUID_WS`, then `NOVA_UUID`, then auto-generated UUID.
 
 ## Examples
 
